@@ -1,11 +1,13 @@
-import { ViewBase, resetCSSProperties } from "ui/core/view-base";
+import { ViewBase } from "ui/core/view-base";
 import { SyntaxTree, Keyframes, parse as parseCss, Node } from "css";
-import { RuleSet, SelectorsMap, SelectorCore, SelectorsMatch, ChangeMap, fromAstNodes } from "ui/styling/css-selector";
+import { RuleSet, SelectorsMap, SelectorCore, SelectorsMatch, ChangeMap, Declaration, fromAstNodes } from "ui/styling/css-selector";
 import { write as traceWrite, categories as traceCategories, messageType as traceMessageType } from "trace";
 import { File, knownFolders, path } from "file-system";
 import * as application from "application";
+import { ShorthandProperty, unsetValue } from "ui/core/properties";
 
 import * as kam from "ui/animation/keyframe-animation";
+
 let keyframeAnimationModule: typeof kam;
 function ensureKeyframeAnimationModule() {
     if (!keyframeAnimationModule) {
@@ -26,54 +28,95 @@ const animationsSymbol: symbol = Symbol("animations");
 let pattern: RegExp = /('|")(.*?)\1/;
 
 export class CssState {
+    private setters: { [key: string]: string | any } = {};
+    private animations = new Map<kam.KeyframeAnimationInfo, kam.KeyframeAnimation>();
+
     constructor(private view: ViewBase, private match: SelectorsMatch<ViewBase>) {
     }
+
+    // TODO: Expose "SelectorsMatch<ViewBase>" property to be set when a view gets new CssState instead of making new CssState instances...
 
     public get changeMap(): ChangeMap<ViewBase> {
         return this.match.changeMap;
     }
 
     public apply(): void {
-        this.view._cancelAllAnimations();
-        resetCSSProperties(this.view.style);
+        // TODO: iOS views have some scoping that controls animations, apply something here.
 
-        let matchingSelectors = this.match.selectors.filter(sel => sel.dynamic ? sel.match(this.view) : true);
+        let newSelectors = this.match.selectors.filter(sel => sel.dynamic ? sel.match(this.view) : true);
+
+        // TODO: Remove this:
         if (this.view.inlineStyleSelector) {
-            matchingSelectors.push(this.view.inlineStyleSelector);
+            newSelectors.push(this.view.inlineStyleSelector);
         }
 
-        matchingSelectors.forEach(s => this.applyDescriptors(this.view, s.ruleset));
-    }
-
-    private applyDescriptors(view: ViewBase, ruleset: RuleSet): void {
-        let style = view.style;
-        ruleset.declarations.forEach(d => {
-            try {
-                // Use the "css:" prefixed name, so that CSS value source is set.
-                let cssPropName = `css:${d.property}`;
-                if (cssPropName in style) {
-                    style[cssPropName] = d.value;
+        let newComputedCss: { [key: string]: string | any } = {};
+        let newAnimations = new Map<kam.KeyframeAnimationInfo, kam.KeyframeAnimation>();
+        newSelectors.forEach(s => {
+            s.ruleset.declarations.forEach(d => {
+                let values = ShorthandProperty._split(d);
+                let shorthand = ShorthandProperty._split(d);
+                if (shorthand) {
+                    for (let [k, v] of shorthand) {
+                        newComputedCss[k.cssLocalName] = v;
+                    }
                 } else {
-                    view[d.property] = d.value;
+                    newComputedCss[d.property] = d.value;
                 }
-            } catch (e) {
-                traceWrite(`Failed to apply property [${d.property}] with value [${d.value}] to ${view}. ${e}`, traceCategories.Error, traceMessageType.error);
+            });
+            let rulesetAnimations: kam.KeyframeAnimationInfo[] = s.ruleset[animationsSymbol];
+            if (rulesetAnimations) {
+                for(let info of rulesetAnimations) {
+                    newAnimations.set(info, null);
+                }
             }
         });
 
-        let ruleAnimations: kam.KeyframeAnimationInfo[] = ruleset[animationsSymbol];
-        if (ruleAnimations && view.isLoaded && view.nativeView !== undefined) {
+        this.animations.forEach((anim, info) => {
+            if (anim.isPlaying && !newAnimations.has(info)) {
+                anim.cancel();
+            }
+        });
+        if (newAnimations.size > 0 && this.view.isLoaded && this.view.nativeView) {
             ensureKeyframeAnimationModule();
-            for (let animationInfo of ruleAnimations) {
-                let animation = keyframeAnimationModule.KeyframeAnimation.keyframeAnimationFromInfo(animationInfo);
-                if (animation) {
-                    view._registerAnimation(animation);
-                    animation.play(view)
-                        .then(() => { view._unregisterAnimation(animation); })
-                        .catch((e) => { view._unregisterAnimation(animation); });
+            newAnimations.forEach((animation, animationInfo) => {
+                if (!this.animations.has(animationInfo)) {
+                    let animation = keyframeAnimationModule.KeyframeAnimation.keyframeAnimationFromInfo(animationInfo);
+                    newAnimations.set(animationInfo, animation);
+                    animation.play(this.view);
+                }
+            });
+            this.animations = newAnimations;
+        } else {
+            newAnimations.clear();
+        }
+        this.animations = newAnimations;
+
+        let style = this.view.style;
+        for (let property in this.setters) {
+            if (!newComputedCss.hasOwnProperty(property)) {
+                let cssPropName = `css:${property}`;
+                if (cssPropName in style) {
+                    style[cssPropName] = unsetValue;
                 }
             }
         }
+        for (let property in newComputedCss) {
+            let value = newComputedCss[property];
+            if (value !== this.setters[property]) {
+                try {
+                    let cssPropName = `css:${property}`;
+                    if (cssPropName in style) {
+                        style[cssPropName] = value;
+                    } else {
+                        this.view[property] = value;
+                    }
+                } catch (e) {
+                    traceWrite(`Failed to apply property [${property}] with value [${value}] to ${this.view}. ${e}`, traceCategories.Error, traceMessageType.error);
+                }
+            }
+        }
+        this.setters = newComputedCss;
     }
 }
 

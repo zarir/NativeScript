@@ -1,6 +1,6 @@
 import { ViewBase as ViewBaseDefinition } from "ui/core/view-base";
 import { Observable, EventData, PropertyChangeData } from "data/observable";
-import { Property, InheritedProperty, Style, clearInheritedProperties, propagateInheritedProperties, resetCSSProperties, initNativeView, resetNativeView } from "./properties";
+import { Property, InheritedProperty, Style, clearInheritedProperties, propagateInheritedProperties, initNativeView, resetNativeView } from "./properties";
 import { Binding, BindingOptions } from "ui/core/bindable";
 import { isIOS, isAndroid } from "platform";
 import { fromString as gestureFromString } from "ui/gestures";
@@ -111,7 +111,6 @@ export class ViewBase extends Observable implements ViewBaseDefinition {
 
     private _style: Style;
     private _isLoaded: boolean;
-    private _registeredAnimations: Array<KeyframeAnimation>;
     private _visualState: string;
     private _inlineStyleSelector: SelectorCore;
 
@@ -641,30 +640,6 @@ export class ViewBase extends Observable implements ViewBaseDefinition {
             this.bindings.get("bindingContext").bind(parent.bindingContext);
         }
     }
-
-    public _registerAnimation(animation: KeyframeAnimation) {
-        if (this._registeredAnimations === undefined) {
-            this._registeredAnimations = new Array<KeyframeAnimation>();
-        }
-        this._registeredAnimations.push(animation);
-    }
-
-    public _unregisterAnimation(animation: KeyframeAnimation) {
-        if (this._registeredAnimations) {
-            let index = this._registeredAnimations.indexOf(animation);
-            if (index >= 0) {
-                this._registeredAnimations.splice(index, 1);
-            }
-        }
-    }
-
-    public _cancelAllAnimations() {
-        if (this._registeredAnimations) {
-            for (let animation of this._registeredAnimations) {
-                animation.cancel();
-            }
-        }
-    }
 }
 
 ViewBase.prototype.isCollapsed = false;
@@ -687,8 +662,6 @@ classNameProperty.register(ViewBase);
 
 function resetStyles(view: ViewBase): void {
     view._isCssApplied = false;
-    view._cancelAllAnimations();
-    resetCSSProperties(view.style);
     view._applyStyleFromScope();
     view.eachChild((child) => {
         resetStyles(child);

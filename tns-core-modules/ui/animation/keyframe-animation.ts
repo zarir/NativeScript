@@ -6,7 +6,7 @@ import {
 } from "ui/animation/keyframe-animation";
 
 import {
-    View,
+    ViewBase,
     backgroundColorProperty,
     scaleXProperty,
     scaleYProperty,
@@ -53,8 +53,14 @@ interface Keyframe {
     forceLayer?: boolean;
 }
 
+declare module "ui/animation/keyframe-animation" {
+    export interface KeyframeAnimation {
+        animations: Keyframe[];
+    }
+}
+
 export class KeyframeAnimation implements KeyframeAnimationDefinition {
-    public animations: Array<Keyframe>;
+    public animations: Keyframe[];
     public delay: number = 0;
     public iterations: number = 1;
 
@@ -62,8 +68,8 @@ export class KeyframeAnimation implements KeyframeAnimationDefinition {
     private _reject;
     private _isPlaying: boolean;
     private _isForwards: boolean;
-    private _nativeAnimations: Array<Animation>;
-    private _target: View;
+    private _nativeAnimations: Animation[];
+    private _target: ViewBase;
 
     public static keyframeAnimationFromInfo(info: KeyframeAnimationInfo) {
         let animations = new Array<Keyframe>();
@@ -145,7 +151,7 @@ export class KeyframeAnimation implements KeyframeAnimationDefinition {
         }
     }
 
-    public play(view: View): Promise<void> {
+    public play(view: ViewBase): Promise<void> {
         if (this._isPlaying) {
             throw new Error("Animation is already playing.");
         }
@@ -169,7 +175,7 @@ export class KeyframeAnimation implements KeyframeAnimationDefinition {
         return animationFinishedPromise;
     }
 
-    private animate(view: View, index: number, iterations: number) {
+    private animate(view: ViewBase, index: number, iterations: number) {
         if (!this._isPlaying) {
             return;
         }
@@ -234,7 +240,7 @@ export class KeyframeAnimation implements KeyframeAnimationDefinition {
         this._reject(new Error("Animation cancelled."));
     }
 
-    private _resetAnimationValues(view: View, animation: Object) {
+    private _resetAnimationValues(view: ViewBase, animation: Object) {
         if ("backgroundColor" in animation) {
             view.style[backgroundColorProperty.keyframe] = unsetValue;
         }

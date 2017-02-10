@@ -86,7 +86,6 @@ export class View extends ViewCommon {
             this.touchListenerIsSet = false;
         }
 
-        this._cancelAllAnimations();
         super.onUnloaded();
     }
 

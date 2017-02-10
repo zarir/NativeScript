@@ -546,6 +546,7 @@ export class CssProperty<T extends Style, U> implements definitions.CssProperty<
 export class CssAnimationProperty<T extends Style, U> {
     public readonly name: string;
     public readonly cssName: string;
+    public readonly cssLocalName: string;
 
     public readonly native: symbol;
     public readonly register: (cls: { prototype }) => void;
@@ -565,7 +566,10 @@ export class CssAnimationProperty<T extends Style, U> {
         CssAnimationProperty.properties[options.cssName || propertyName] = this;
         this._valueConverter = options.valueConverter;
 
-        const cssName = "css:" + (options.cssName || propertyName);
+        const cssLocalName = (options.cssName || propertyName);
+        this.cssLocalName = cssLocalName;
+
+        const cssName = "css:" + cssLocalName;
         this.cssName = cssName;
 
         const keyframeName = "keyframe:" + propertyName;
@@ -801,6 +805,9 @@ export class ShorthandProperty<T extends Style, P> implements definitions.Shorth
     public readonly native: symbol;
     public readonly sourceKey: symbol;
 
+    private readonly _converter: (value: string | P) => [definitions.CssProperty<any, any>, any][];
+    private static shorthandProperties: { [cssName: string]: ShorthandProperty<any, any> } = {};
+
     constructor(options: definitions.ShorthandPropertyOptions<P>) {
         this.name = options.name;
 
@@ -810,7 +817,10 @@ export class ShorthandProperty<T extends Style, P> implements definitions.Shorth
         this.cssName = `css:${options.cssName}`;
         this.cssLocalName = `${options.cssName}`;
 
+        ShorthandProperty.shorthandProperties[this.cssLocalName] = this;
+
         const converter = options.converter;
+        this._converter = converter;
 
         function setLocalValue(this: T, value: string | P): void {
             if (this[key] !== value) {
@@ -857,6 +867,18 @@ export class ShorthandProperty<T extends Style, P> implements definitions.Shorth
         if (this.cssLocalName !== this.cssName) {
             Object.defineProperty(cls.prototype, this.cssLocalName, this.localValueDescriptor);
         }
+    }
+
+    public static _getByCssName(cssName: string): ShorthandProperty<any, any> {
+        return ShorthandProperty.shorthandProperties[cssName];
+    }
+
+    public static _split(kvp: { property: string, value: string }): [definitions.CssProperty<any, any>, any][] {
+        let property = ShorthandProperty.shorthandProperties[kvp.property];
+        if (property) {
+            return property._converter(kvp.value);
+        }
+        return null;
     }
 }
 
@@ -982,19 +1004,6 @@ export function clearInheritedProperties(view: ViewBase): void {
         const sourceKey = prop.sourceKey;
         if (style[sourceKey] === ValueSource.Inherited) {
             prop.setInheritedValue.call(style, unsetValue);
-        }
-    }
-}
-
-export function resetCSSProperties(style: Style): void {
-    let symbols = (<any>Object).getOwnPropertySymbols(style);
-    for (let symbol of symbols) {
-        let cssProperty;
-        if (cssProperty = cssSymbolPropertyMap[symbol]) {
-            style[cssProperty.cssName] = unsetValue;
-            if (cssProperty instanceof CssAnimationProperty) {
-                style[cssProperty.keyframe] = unsetValue;
-            }
         }
     }
 }

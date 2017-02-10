@@ -1,5 +1,5 @@
 declare module "ui/animation/keyframe-animation" {
-    import { View } from "ui/core/view";
+    import { ViewBase } from "ui/core/view";
 
     export interface KeyframeDeclaration {
         property: string;
@@ -83,7 +83,7 @@ declare module "ui/animation/keyframe-animation" {
         /**
          * Plays the animation.
          */
-        public play: (view: View) => Promise<void>;
+        public play: (view: ViewBase) => Promise<void>;
 
         /**
          * Cancels a playing animation.
@@ -93,6 +93,6 @@ declare module "ui/animation/keyframe-animation" {
         /**
          * Creates a keyframe animation from animation definition.
          */
-        public static keyframeAnimationFromInfo(info: KeyframeAnimationInfo);
+        public static keyframeAnimationFromInfo(info: KeyframeAnimationInfo): KeyframeAnimation;
     }
 }

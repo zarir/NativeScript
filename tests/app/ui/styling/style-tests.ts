@@ -10,7 +10,8 @@ import * as helper from "../../ui/helper";
 import * as types from "utils/types";
 import * as viewModule from "ui/core/view";
 import { resolveFileNameFromUrl } from "ui/styling/style-scope";
-import { unsetValue } from "ui/core/view";
+import { unsetValue, backgroundColorProperty } from "ui/core/view";
+import { Button } from "ui/button";
 
 export function test_css_dataURI_is_applied_to_backgroundImageSource() {
     const stack = new stackModule.StackLayout();
@@ -1457,3 +1458,23 @@ export function test_resolveFileNameFromUrl_unexisting_file() {
 // <snippet module="ui/styling" title="styling">
 // For information and example how to use style properties please refer to special [**Styling**](../../../styling.md) topic.
 // </snippet>
+
+export function test_css_doesnt_set_multiple_times() {
+    const button = new Button();
+    button.id = "login";
+    button.className = "big";
+    let setterCount = 0;
+    Object.defineProperty(button, backgroundColorProperty.native, {
+        enumerable: true,
+        configurable: true,
+        get: () => null,
+        set: value => setterCount++
+    })
+
+    helper.buildUIAndRunTest(button, function (views: Array<viewModule.View>) {
+        const page = <pageModule.Page>views[1];
+        const expected = "horizontal";
+        page.css = `Button { background-color: red; } .big { background-color: green; } #login { background-color: blue; }`;
+        TKUnit.assertEqual(setterCount, 1, "Native setter expected to be called once.");
+    });
+}

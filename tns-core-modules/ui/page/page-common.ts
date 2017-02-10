@@ -1,6 +1,6 @@
 ﻿import { Page as PageDefinition, NavigatedData, ShownModallyData } from "ui/page";
 import {
-    ContentView, View, eachDescendant, Property, Color, isIOS, booleanConverter, resetCSSProperties
+    ContentView, View, eachDescendant, Property, Color, isIOS, booleanConverter
 } from "ui/content-view";
 import { Frame, topmost as topmostFrame, resolvePageFromEntry } from "ui/frame";
 import { ActionBar } from "ui/action-bar";
@@ -81,10 +81,6 @@ export class PageBase extends ContentView implements PageDefinition {
     }
 
     private _refreshCss(): void {
-        if (this._cssApplied) {
-            this._resetCssValues();
-        }
-
         this._cssApplied = false;
         if (this.isLoaded) {
             this._applyCss();
@@ -256,8 +252,6 @@ export class PageBase extends ContentView implements PageDefinition {
             return;
         }
 
-        this._styleScope.ensureSelectors();
-
         const scope = this._styleScope;
         const checkSelectors = (view: View): boolean => {
             scope.applySelectors(view);
@@ -268,17 +262,6 @@ export class PageBase extends ContentView implements PageDefinition {
         eachDescendant(this, checkSelectors);
 
         this._cssApplied = true;
-    }
-
-    private _resetCssValues() {
-        const resetCssValuesFunc = (view: View): boolean => {
-            view._cancelAllAnimations();
-            resetCSSProperties(view.style);
-            return true;
-        };
-
-        resetCssValuesFunc(this);
-        eachDescendant(this, resetCssValuesFunc);
     }
 }
 
