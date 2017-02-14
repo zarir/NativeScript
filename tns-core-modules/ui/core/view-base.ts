@@ -4,7 +4,7 @@ import { Property, InheritedProperty, Style, clearInheritedProperties, propagate
 import { Binding, BindingOptions } from "ui/core/bindable";
 import { isIOS, isAndroid } from "platform";
 import { fromString as gestureFromString } from "ui/gestures";
-import { SelectorCore } from "ui/styling/css-selector";
+import { SelectorCore, ChangeMap } from "ui/styling/css-selector";
 import { KeyframeAnimation } from "ui/animation/keyframe-animation";
 
 import { isEnabled as traceEnabled, write as traceWrite, categories as traceCategories, notifyEvent as traceNotifyEvent, isCategorySet } from "trace";
@@ -126,7 +126,9 @@ export class ViewBase extends Observable implements ViewBaseDefinition {
     public _context: any;
     public _isAddedToNativeVisualTree: boolean;
     public _isCssApplied: boolean;
+
     public _cssState: ssm.CssState;
+    private _cssChangeMap: ChangeMap<ViewBaseDefinition>;
 
     constructor() {
         super();
@@ -188,6 +190,7 @@ export class ViewBase extends Observable implements ViewBaseDefinition {
         this._isLoaded = true;
         this._loadEachChild();
         this._emit("loaded");
+        this._subscribeForCssChanges();
     }
 
     public _loadEachChild() {
@@ -198,7 +201,8 @@ export class ViewBase extends Observable implements ViewBaseDefinition {
     }
 
     public onUnloaded() {
-        this._setCssState(null);
+        this._unsubscribeFromCssChanges();
+
         this._unloadEachChild();
         this._isLoaded = false;
         this._emit("unloaded");
@@ -225,61 +229,66 @@ export class ViewBase extends Observable implements ViewBaseDefinition {
         this._isCssApplied = true;
     }
 
-    // TODO: Make sure the state is set to null and this is called on unloaded to clean up change listeners...
-    _setCssState(next: ssm.CssState): void {
-        const previous = this._cssState;
-        this._cssState = next;
+    _subscribeForCssChanges(): void {
+        if (this._cssState) {
+            if (!this._invalidateCssHandler) {
+                this._invalidateCssHandler = () => {
+                    // TODO: Try to remove this flag: _invalidateCssHandlerSuspended
+                    if (this._invalidateCssHandlerSuspended) {
+                        console.log("Really?");
+                        return;
+                    }
+                    this.applyCssState();
+                };
+            }
 
-        if (!this._invalidateCssHandler) {
-            this._invalidateCssHandler = () => {
-                if (this._invalidateCssHandlerSuspended) {
-                    return;
+            this._cssState.changeMap.forEach((changes, view) => {
+                if (changes.attributes) {
+                    changes.attributes.forEach(attribute => {
+                        view.addEventListener(attribute + "Change", this._invalidateCssHandler);
+                    });
                 }
-                this.applyCssState();
-            };
+                if (changes.pseudoClasses) {
+                    changes.pseudoClasses.forEach(pseudoClass => {
+                        let eventName = ":" + pseudoClass;
+                        view.addEventListener(":" + pseudoClass, this._invalidateCssHandler);
+                        if (view[eventName]) {
+                            view[eventName](+1);
+                        }
+                    });
+                }
+            });
+            this._unsubscribeFromCssChanges();
+            this._cssChangeMap = this._cssState.changeMap;
         }
+    }
 
+    _unsubscribeFromCssChanges(): void {
+        if (this._cssChangeMap) {
+            this._cssChangeMap.forEach((changes, view) => {
+                if (changes.attributes) {
+                    changes.attributes.forEach(attribute => {
+                        view.removeEventListener("onPropertyChanged:" + attribute, this._invalidateCssHandler);
+                    });
+                }
+                if (changes.pseudoClasses) {
+                    changes.pseudoClasses.forEach(pseudoClass => {
+                        let eventName = ":" + pseudoClass;
+                        view.removeEventListener(eventName, this._invalidateCssHandler);
+                        if (view[eventName]) {
+                            view[eventName](-1);
+                        }
+                    });
+                }
+            });
+            this._cssChangeMap = null;
+        }
+    }
+
+    _cssStateChanged(): void {
         try {
             this._invalidateCssHandlerSuspended = true;
-
-            if (next) {
-                next.changeMap.forEach((changes, view) => {
-                    if (changes.attributes) {
-                        changes.attributes.forEach(attribute => {
-                            view.addEventListener(attribute + "Change", this._invalidateCssHandler);
-                        });
-                    }
-                    if (changes.pseudoClasses) {
-                        changes.pseudoClasses.forEach(pseudoClass => {
-                            let eventName = ":" + pseudoClass;
-                            view.addEventListener(":" + pseudoClass, this._invalidateCssHandler);
-                            if (view[eventName]) {
-                                view[eventName](+1);
-                            }
-                        });
-                    }
-                });
-            }
-
-            if (previous) {
-                previous.changeMap.forEach((changes, view) => {
-                    if (changes.attributes) {
-                        changes.attributes.forEach(attribute => {
-                            view.removeEventListener("onPropertyChanged:" + attribute, this._invalidateCssHandler);
-                        });
-                    }
-                    if (changes.pseudoClasses) {
-                        changes.pseudoClasses.forEach(pseudoClass => {
-                            let eventName = ":" + pseudoClass;
-                            view.removeEventListener(eventName, this._invalidateCssHandler);
-                            if (view[eventName]) {
-                                view[eventName](-1);
-                            }
-                        });
-                    }
-                });
-            }
-
+            this._subscribeForCssChanges();
         } finally {
             this._invalidateCssHandlerSuspended = false;
         }
@@ -302,9 +311,7 @@ export class ViewBase extends Observable implements ViewBaseDefinition {
             return;
         }
 
-        // this.style._beginUpdate();
         this._cssState.apply();
-        // this.style._endUpdate();
     }
 
     private pseudoClassAliases = {

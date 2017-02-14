@@ -12,6 +12,7 @@ export var test_value_Inherited_stronger_than_Default = function () {
     page.content = testStack;
     testStack.addChild(btn);
     page.css = "stackLayout { color: red; }";
+    console.log("Btn color: " + btn.color);
     helper.assertViewColor(btn, "#FF0000");
     page.css = "";
 }

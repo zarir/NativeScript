@@ -119,7 +119,7 @@ declare module "ui/core/view-base" {
         _domId: number;
 
         _cssState: any /* "ui/styling/style-scope" */;
-        _setCssState(next: any /* "ui/styling/style-scope" */);
+        _cssStateChanged();
 
         _context: any /* android.content.Context */;
 

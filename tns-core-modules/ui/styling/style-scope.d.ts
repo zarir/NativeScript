@@ -12,7 +12,7 @@ declare module "ui/styling/style-scope" {
         public apply(): void;
 
         /**
-         * Gets the static selectors that match the view and the dynamic selectors that may potentially match the view.
+         * Gets the views, attributes and pseudoclasses that may potentially change the selectors that match the view.
          */
         public changeMap: ChangeMap<ViewBase>;
     }

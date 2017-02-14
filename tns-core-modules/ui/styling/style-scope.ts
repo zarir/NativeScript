@@ -30,8 +30,9 @@ let pattern: RegExp = /('|")(.*?)\1/;
 export class CssState {
     private setters: { [key: string]: string | any } = {};
     private animations = new Map<kam.KeyframeAnimationInfo, kam.KeyframeAnimation>();
+    private match: SelectorsMatch<ViewBase>;
 
-    constructor(private view: ViewBase, private match: SelectorsMatch<ViewBase>) {
+    constructor(private view: ViewBase) {
     }
 
     // TODO: Expose "SelectorsMatch<ViewBase>" property to be set when a view gets new CssState instead of making new CssState instances...
@@ -41,6 +42,8 @@ export class CssState {
     }
 
     public apply(): void {
+        // this.style._beginUpdate();
+
         // TODO: iOS views have some scoping that controls animations, apply something here.
 
         let newSelectors = this.match.selectors.filter(sel => sel.dynamic ? sel.match(this.view) : true);
@@ -54,14 +57,17 @@ export class CssState {
         let newAnimations = new Map<kam.KeyframeAnimationInfo, kam.KeyframeAnimation>();
         newSelectors.forEach(s => {
             s.ruleset.declarations.forEach(d => {
-                let values = ShorthandProperty._split(d);
-                let shorthand = ShorthandProperty._split(d);
-                if (shorthand) {
-                    for (let [k, v] of shorthand) {
-                        newComputedCss[k.cssLocalName] = v;
+                try {
+                    let shorthand = ShorthandProperty._split(d);
+                    if (shorthand) {
+                        for (let [k, v] of shorthand) {
+                            newComputedCss[k.cssLocalName] = v;
+                        }
+                    } else {
+                        newComputedCss[d.property] = d.value;
                     }
-                } else {
-                    newComputedCss[d.property] = d.value;
+                } catch(e) {
+                    traceWrite(`Failed to apply property [${d.property}] with value [${d.value}] to ${this.view}. ${e}`, traceCategories.Error, traceMessageType.error);
                 }
             });
             let rulesetAnimations: kam.KeyframeAnimationInfo[] = s.ruleset[animationsSymbol];
@@ -75,12 +81,15 @@ export class CssState {
         this.animations.forEach((anim, info) => {
             if (anim.isPlaying && !newAnimations.has(info)) {
                 anim.cancel();
+                // TODO: Canceling the animation doesn't seem to clear well all values.
             }
         });
         if (newAnimations.size > 0 && this.view.isLoaded && this.view.nativeView) {
             ensureKeyframeAnimationModule();
             newAnimations.forEach((animation, animationInfo) => {
-                if (!this.animations.has(animationInfo)) {
+                if (this.animations.has(animationInfo)) {
+                    newAnimations.set(animationInfo, this.animations.get(animationInfo));
+                } else {
                     let animation = keyframeAnimationModule.KeyframeAnimation.keyframeAnimationFromInfo(animationInfo);
                     newAnimations.set(animationInfo, animation);
                     animation.play(this.view);
@@ -117,6 +126,8 @@ export class CssState {
             }
         }
         this.setters = newComputedCss;
+
+        // this.style._endUpdate();
     }
 }
 
@@ -255,11 +266,14 @@ export class StyleScope {
 
     public applySelectors(view: ViewBase): void {
         this.ensureSelectors();
+        let match = this._selectors.query(view);
 
-        let state = this._selectors.query(view);
+        if (!view._cssState) {
+            view._cssState = new CssState(view);
+        }
 
-        let nextState = new CssState(view, state);
-        view._setCssState(nextState);
+        view._cssState.match = match;
+        view._cssStateChanged();
     }
 
     public query(node: Node): SelectorCore[] {

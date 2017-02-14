@@ -25,7 +25,7 @@ page.on(Page.navigatedToEvent, onNavigatedTo);
 
 function runTests() {
     setTimeout(function () {
-        tests.runAll();
+        tests.runAll("VALUE-SOURCE.test_value_Inherited_stronger_than_Default");
     }, 10);
 }
 
