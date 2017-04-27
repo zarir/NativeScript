@@ -20,6 +20,8 @@ let navDepth = -1;
 let fragmentId = -1;
 let activityInitialized = false;
 
+android.app.FragmentManager.enableDebugLogging(true);
+
 function onFragmentShown(fragment: android.app.Fragment) {
     if (traceEnabled()) {
         traceWrite(`SHOWN ${fragment}`, traceCategories.NativeLifecycle);
@@ -51,16 +53,20 @@ function onFragmentShown(fragment: android.app.Fragment) {
         }
     }
 
-    const isBack = currentNavigationContext ? currentNavigationContext.isBackNavigation : false;
-
-    frame._addView(page);
-
     // onFragmentShown is called before NativeActivity.start where we call frame.onLoaded
     // We need to call frame.onLoaded() here so that the call to frame._addView(page) will emit the page.loaded event
     // before the page.navigatedTo event making the two platforms identical.
     if (!frame.isLoaded) {
         frame._currentEntry = entry;
         frame.onLoaded();
+    }
+
+    const isBack = currentNavigationContext ? currentNavigationContext.isBackNavigation : false;
+    if (!isBack) {
+        frame._addView(page);
+    } else if (!page.isLoaded) {
+        // Pages in backstack are unloaded so raise loaded here.
+        page.onLoaded();
     }
 
     // Handle page transitions.
@@ -113,6 +119,15 @@ export class Frame extends FrameBase {
         return this._android;
     }
 
+    private completeTransitioneNeeded: number = 0;
+
+    public _processNavigationQueue(page: Page) {
+        this.completeTransitioneNeeded--;
+        if (this.completeTransitioneNeeded === 0) {
+            super._processNavigationQueue(this.currentPage);
+        }
+    }
+
     public _navigateCore(backstackEntry: BackstackEntry) {
         super._navigateCore(backstackEntry);
 
@@ -145,6 +160,7 @@ export class Frame extends FrameBase {
         if (clearHistory) {
             navDepth = -1;
         }
+
         navDepth++;
         fragmentId++;
         let newFragmentTag = `fragment${fragmentId}[${navDepth}]`;
@@ -177,7 +193,8 @@ export class Frame extends FrameBase {
             transitionModule._clearForwardTransitions(currentFragment);
 
             if (animated && navigationTransition) {
-                transitionModule._setAndroidFragmentTransitions(this.android.cachePagesOnNavigate, navigationTransition, currentFragment, newFragment, fragmentTransaction);
+                const transitionCreated = transitionModule._setAndroidFragmentTransitions(this.android.cachePagesOnNavigate, navigationTransition, currentFragment, newFragment, fragmentTransaction);
+                this.completeTransitioneNeeded = transitionCreated ? 2 : 1;
             }
         }
 
@@ -189,33 +206,39 @@ export class Frame extends FrameBase {
                 let fragmentToRemove = manager.findFragmentByTag(manager.getBackStackEntryAt(i).getName());
                 Frame._clearHistory(fragmentToRemove);
             }
+
             if (currentFragment) {
                 // We need to reverse the transitions because Android will ask the current fragment
                 // to create its POP EXIT animator due to popping the back stack, but in reality
                 // we need to create the EXIT animator because we are actually going forward and not back.
                 transitionModule._prepareCurrentFragmentForClearHistory(currentFragment);
             }
+
             let firstEntryName = manager.getBackStackEntryAt(0).getName();
             if (traceEnabled()) {
                 traceWrite(`POP BACK STACK ${firstEntryName}`, traceCategories.Navigation);
             }
+
             manager.popBackStackImmediate(firstEntryName, android.app.FragmentManager.POP_BACK_STACK_INCLUSIVE);
         }
 
-        // Hide/remove current fragment if it exists and was not popped
+        // remove current fragment if it exists and was not popped
+        // We can afford to remove it because we keep the nativeView so
+        // when added back we don't create new nativeView but use the existing.
+        // This give us faster back navigation.
         if (currentFragment && !emptyNativeBackStack) {
-            if (this.android.cachePagesOnNavigate && !clearHistory) {
-                if (traceEnabled()) {
-                    traceWrite(`\tHIDE ${currentFragment}`, traceCategories.Navigation);
-                }
-                fragmentTransaction.hide(currentFragment);
-            }
-            else {
-                if (traceEnabled()) {
-                    traceWrite(`\tREMOVE ${currentFragment}`, traceCategories.Navigation);
-                }
-                fragmentTransaction.remove(currentFragment);
-            }
+            // if (this.android.cachePagesOnNavigate && !clearHistory) {
+            //     if (traceEnabled()) {
+            //         traceWrite(`\tHIDE ${currentFragment}`, traceCategories.Navigation);
+            //     }
+            //     fragmentTransaction.hide(currentFragment);
+            // }
+            // else {
+            //     if (traceEnabled()) {
+            //         traceWrite(`\tREMOVE ${currentFragment}`, traceCategories.Navigation);
+            //     }
+            fragmentTransaction.remove(currentFragment);
+            // }
         }
 
         // Add newFragment
@@ -266,7 +289,11 @@ export class Frame extends FrameBase {
         callbacks.clearHistory = true; // This is hacky
         transitionModule._clearBackwardTransitions(fragment);
         transitionModule._clearForwardTransitions(fragment);
-        transitionModule._removePageNativeViewFromAndroidParent(callbacks.entry.resolvedPage);
+        const page = callbacks.entry.resolvedPage;
+        // transitionModule._removePageNativeViewFromAndroidParent(page);
+        if (page.frame) {
+            page.frame._removeView(page);
+        }
     }
 
     public _goBackCore(backstackEntry: BackstackEntry) {
@@ -282,6 +309,7 @@ export class Frame extends FrameBase {
         }
 
         const manager = this._android.activity.getFragmentManager();
+        
         if (manager.getBackStackEntryCount() > 0) {
             // pop all other fragments up until the named one
             // this handles cases where user may navigate to an inner page without adding it on the backstack
@@ -404,7 +432,7 @@ class AndroidFrame extends Observable implements AndroidFrameDefinition {
 
     private _showActionBar = true;
     private _owner: Frame;
-    private _cachePagesOnNavigate: boolean;
+    private _cachePagesOnNavigate: boolean = true;
 
     constructor(owner: Frame) {
         super();
@@ -674,8 +702,7 @@ class FragmentCallbacksImplementation implements AndroidFragmentCallbacks {
             let frame = getFrameById(frameId);
             if (frame) {
                 this.frame = frame;
-            }
-            else {
+            } else {
                 throw new Error(`Cannot find Frame for ${fragment}`);
             }
 
@@ -687,6 +714,7 @@ class FragmentCallbacksImplementation implements AndroidFragmentCallbacks {
         if (traceEnabled()) {
             traceWrite(`${fragment}.onCreateView(inflater, container, ${savedInstanceState})`, traceCategories.NativeLifecycle);
         }
+
         const entry = this.entry;
         const page = entry.resolvedPage;
         try {
@@ -716,19 +744,30 @@ class FragmentCallbacksImplementation implements AndroidFragmentCallbacks {
     }
 
     public onDestroyView(fragment: android.app.Fragment, superFunc: Function): void {
+        const entry = this.entry;
+        const page = entry.resolvedPage;
+        console.log(`------------- ${page}.onDestroyView`);
         if (traceEnabled()) {
             traceWrite(`${fragment}.onDestroyView()`, traceCategories.NativeLifecycle);
         }
         superFunc.call(fragment);
+
         // Detaching the page has been move in onFragmentHidden due to transitions.
-        onFragmentHidden(fragment, true);
+        onFragmentHidden(fragment, false);
     }
 
     public onDestroy(fragment: android.app.Fragment, superFunc: Function): void {
+        const entry = this.entry;
+        const page = entry.resolvedPage;
+        console.log(`------------- ${page}.onDestroy`);
+
         if (traceEnabled()) {
             traceWrite(`${fragment}.onDestroy()`, traceCategories.NativeLifecycle);
         }
         superFunc.call(fragment);
+
+        // Detaching the page has been move in onFragmentHidden due to transitions.
+        onFragmentHidden(fragment, true);
     }
 
     public toStringOverride(fragment: android.app.Fragment, superFunc: Function): string {
