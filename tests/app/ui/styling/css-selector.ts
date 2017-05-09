@@ -235,7 +235,7 @@ export function test_query_match_one_child_group() {
 
 export function test_query_match_one_sibling_group() {
     let {map} = create(`list button:highlighted+button:disabled { color: red; }`);
-    let siblings, list, button, disabledButton;
+    let list, button, disabledButton;
 
     list = {
         cssType: "list",

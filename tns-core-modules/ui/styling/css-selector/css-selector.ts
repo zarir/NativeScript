@@ -45,10 +45,14 @@ namespace Match {
     export var Static = false;
 }
 
-function getNodeDirectSibling (node) {
-    if (!node.parent || !node.parent.getChildIndex || !node.parent.getChildAt) return false;
+function getNodeDirectSibling(node): null | Node {
+    if (!node.parent || !node.parent.getChildIndex || !node.parent.getChildAt) {
+        return null;
+    }
     const nodeIndex = node.parent.getChildIndex(node);
-    if (nodeIndex === 0) return false;
+    if (nodeIndex === 0) {
+        return null;
+    }
     return node.parent.getChildAt(nodeIndex - 1);
 }
 
